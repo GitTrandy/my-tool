@@ -175,16 +175,25 @@
       // 区域标记
       if (c.includes('师门技能') || c.includes('生活技能')) { inSkillArea = true; return; }
 
-      // 1. 角色｜门派｜等级（全角｜或半角|）
+      // 1. 角色｜门派｜等级（全角｜或半角|）；OCR 可能把等级拆到下一行，故两段也先取角色/门派
       if (line.includes('｜') || line.includes('|')) {
         const parts = line.split(/[｜|]/).map(s => s.trim());
-        if (parts.length >= 3) {
+        if (parts.length >= 2) {
           out.info.role = compact(parts[0]);
           out.info.name = out.info.role;
           out.info.menpai = compact(parts[1]);
+        }
+        if (parts.length >= 3) {
           const lv = parts[2].match(/(\d+)/);
           if (lv) out.info.level = +lv[1];
         }
+        return;
+      }
+
+      // 1b. 被拆到独立一行的等级（如“140级”）；仅在尚未取到等级时补
+      const lvOnly = line.match(/^(\d+)\s*级\s*$/);
+      if (lvOnly) {
+        if (out.info.level === 0) out.info.level = +lvOnly[1];
         return;
       }
 
@@ -32779,7 +32788,8 @@ window.MH_DATA = {
 </script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: "微软雅黑","Microsoft YaHei",sans-serif; background: linear-gradient(180deg,#eef2f8,#f4f6fa 240px); color:#23303f; padding:20px; -webkit-text-size-adjust:100%; }
+  body { font-family: "微软雅黑","Microsoft YaHei",sans-serif; background: linear-gradient(180deg,#eef2f8,#f4f6fa 240px); color:#23303f; padding:20px; -webkit-text-size-adjust:100%; overflow-x:hidden; }
+  img { max-width:100%; }
   .wrap { max-width:1080px; margin:0 auto; }
   h1 { color:#163a5c; font-size:21px; margin-bottom:6px; }
   .sub { color:#7a8699; font-size:13px; line-height:1.6; margin-bottom:18px; }
@@ -32849,12 +32859,69 @@ window.MH_DATA = {
   .toast { position:fixed; left:50%; bottom:34px; transform:translateX(-50%) translateY(20px); max-width:90%; width:max-content; background:rgba(20,32,48,.92); color:#fff; font-size:14px; line-height:1.5; padding:13px 22px; border-radius:12px; box-shadow:0 8px 24px rgba(0,0,0,.25); opacity:0; pointer-events:none; transition:opacity .25s,transform .25s; z-index:9999; }
   .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 
+  /* 历史记录 */
+  .hist-wrap { margin-top:24px; }
+  .hist-head { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .hist-title { font-size:16px; color:#163a5c; font-weight:bold; }
+  .hist-count { font-size:12px; color:#98a2b0; font-weight:normal; margin-left:6px; }
+  .hist-tools { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; }
+  .hist-sort { display:flex; gap:8px; }
+  .hist-avg { font-size:13px; font-weight:bold; color:#1f4e79; background:#eef5fc; border:1px solid #dce8f5; padding:7px 14px; border-radius:20px; white-space:nowrap; }
+  .sort-btn { background:#fff; border:1px solid #d4dce8; color:#556070; font-size:13px; font-weight:bold; padding:8px 14px; border-radius:20px; cursor:pointer; }
+  .sort-btn.on { background:#2e75b6; border-color:#2e75b6; color:#fff; }
+  .hist-list { display:flex; flex-direction:column; gap:10px; }
+  .hist-item { background:#fff; border:1px solid #e6ebf3; border-radius:12px; padding:14px 16px; cursor:pointer; box-shadow:0 2px 8px rgba(20,40,70,.05); transition:border-color .15s, transform .1s; -webkit-user-select:none; user-select:none; touch-action:manipulation; }
+  .hist-item:hover { border-color:#2e75b6; }
+  .hist-item:active { transform:scale(.99); }
+  .hist-top { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; }
+  .hist-name { font-size:16px; font-weight:bold; color:#1f4e79; }
+  .hist-ratio { font-size:15px; font-weight:bold; color:#b9770e; background:#fdf3e3; border:1px solid #f3e0bd; padding:4px 12px; border-radius:16px; white-space:nowrap; }
+  .hist-meta { display:flex; flex-wrap:wrap; gap:8px 18px; font-size:13px; color:#556070; }
+  .hist-meta b { color:#23303f; }
+  .hist-time { font-size:12px; color:#98a2b0; margin-top:9px; }
+  .hist-empty { font-size:13px; color:#98a2b0; text-align:center; padding:22px; background:#fcfdfe; border:1px dashed #d4dce8; border-radius:12px; }
+  .hist-item.confirm { border-color:#e74c3c; background:#fef6f5; }
+  .confirm-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .confirm-text { flex:1; min-width:120px; font-size:14px; color:#c0392b; font-weight:bold; }
+  .confirm-yes { background:#e74c3c; color:#fff; border:none; padding:9px 16px; border-radius:8px; font-size:13px; cursor:pointer; }
+  .confirm-no { background:#fff; border:1px solid #d4dce8; color:#556070; padding:9px 16px; border-radius:8px; font-size:13px; cursor:pointer; }
+
   @media (max-width:600px){
     body { padding:12px; }
-    .hero-item { min-width:46%; }
-    .hero-item .v { font-size:21px; }
+    h1 { font-size:19px; }
     .drop { padding:42px 16px; }
+
+    /* 顶部结果卡片：两列整齐、不溢出 */
+    .hero { padding:18px 16px; }
+    .hero-item { min-width:0; flex:1 1 46%; }
+    .hero-item .v { font-size:20px; }
+    .rate-box { min-width:0; flex:1 1 100%; }
+    .stepper { flex-wrap:wrap; }
     .stepper button { width:54px; height:54px; }
+    .stepper .val { flex:1 1 auto; min-width:0; }
+
+    /* 只读信息：统一两列 */
+    .ro-grid { gap:12px 10px; }
+    .ro-item { min-width:0; flex:1 1 46%; }
+
+    /* 模块网格：统一两列，控件满宽对齐 */
+    .grid { gap:12px 10px; }
+    .grid label { min-width:0; flex:1 1 46%; }
+    .grid select, .grid input { width:100%; min-width:0 !important; }
+
+    /* 动态行（师门/生活）：纵向堆叠、满宽对齐 */
+    .bp-row { flex-direction:column; align-items:stretch; gap:10px; }
+    .bp-row label { min-width:0; width:100%; }
+    .bp-row select, .bp-row input { width:100%; min-width:0 !important; }
+    .bp-row .del { width:100%; }
+
+    /* 通用控件覆盖内联宽度，防止溢出 */
+    select { min-width:0; }
+    input[type=text], input[type=number] { max-width:100%; }
+    .sec { padding:16px 14px; }
+    .hist-item { padding:13px 14px; }
+    .hist-meta { gap:7px 14px; }
+    .confirm-text { flex:1 1 100%; }
   }
 </style>
 </head>
@@ -32872,6 +32939,20 @@ window.MH_DATA = {
       <span class="pick-btn">选择图片</span>
     </div>
     <input type="file" id="fileInput" accept="image/*">
+
+    <div class="hist-wrap" id="histWrap">
+      <div class="hist-head">
+        <div class="hist-title">历史查看记录<span class="hist-count" id="histCount"></span></div>
+        <div class="hist-tools">
+          <span class="hist-avg" id="histAvg">平均性价比 —</span>
+          <div class="hist-sort">
+            <button type="button" class="sort-btn on" id="sortTime">按时间</button>
+            <button type="button" class="sort-btn" id="sortRatio">按性价比</button>
+          </div>
+        </div>
+      </div>
+      <div class="hist-list" id="histList"></div>
+    </div>
   </div>
 
   <!-- 识别态 -->
@@ -32951,6 +33032,7 @@ async function runRecognize(file) {
     setProg(98, '正在解析并计算…');
     const S = parseOcr(D, lines);
     renderResult(S);
+    saveHistory(S);
     setProg(100, '完成');
     show('Result');
   } catch (err) {
@@ -32972,6 +33054,182 @@ document.getElementById('retryCancel').onclick = () => {
   document.getElementById('retryBox').style.display = 'none';
   show('Pick');
 };
+
+// ===== 历史查看记录（localStorage 本地持久化） =====
+const HISTORY_KEY = 'mh_role_history_v1';
+const HISTORY_MAX = 100;
+let histSortMode = 'time';   // 'time' | 'ratio'
+let histConfirmId = null;    // 当前处于删除确认态的记录 id
+
+function loadHistory() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+function persistHistory(arr) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(arr)); }
+  catch (e) { showToast('本地存储已满，历史记录可能无法保存'); }
+}
+
+// 用默认口径独立计算总梦幻币与性价比（与结果态默认比例一致）
+function computeSummary(S) {
+  const cumCash = (group, key, lv) => {
+    const rows = D[group][key].rows;
+    const r = rows.find(x => (x.level !== undefined ? x.level : x.id) === lv);
+    if (!r) return 0;
+    return r.cash_total !== undefined ? r.cash_total : r.money_total;
+  };
+  const petExpAt = lv => { const r = D.pet_xiulian.rows.find(x => x.level === lv); return r ? r.exp_total : 0; };
+  let xlCash = 0;
+  Object.keys(S.xl).forEach(t => { if (S.xl[t] > 0) xlCash += cumCash('xiulian', t, S.xl[t]); });
+  let smCash = 0;
+  S.sm.forEach(it => { if (it.lv > 0) { const r = D.shimen.rows.find(x => x.level === it.lv); if (r) smCash += r.cash_total; } });
+  let bpCash = 0;
+  S.bp.forEach(it => { if (it.lv > 0) bpCash += cumCash('bangpai', it.sid, it.lv); });
+  const qydCash = S.qyd > 0 ? D.qianyuandan.find(x => x.id === S.qyd).money_total : 0;
+  let petExp = 0;
+  Object.keys(S.pet).forEach(t => { petExp += petExpAt(S.pet[t]); });
+  const petCash = Math.round(petExp / 150 * S.petWan * 10000);
+  const extra = Math.max(0, S.mount.curGrowth - S.mount.baseGrowth);
+  const mountCash = Math.round(extra * 6480 * 4000);
+  const total = xlCash + smCash + bpCash + qydCash + petCash + mountCash;
+  const rmb = total / 10000 / 200 * 14.3;
+  const ratio = S.info.origPrice > 0 ? +(rmb / S.info.origPrice * 100).toFixed(1) : null;
+  return { total, rmb, ratio };
+}
+
+function saveHistory(S) {
+  const sum = computeSummary(S);
+  const rec = {
+    id: 'h' + Date.now() + Math.floor(Math.random() * 1000),
+    ts: Date.now(),
+    role: S.info.role || S.info.name || '—',
+    level: S.info.level || 0,
+    menpai: S.info.menpai || '—',
+    price: S.info.origPrice || 0,
+    ratio: sum.ratio,
+    S: S
+  };
+  const arr = loadHistory();
+  arr.push(rec);
+  while (arr.length > HISTORY_MAX) arr.shift();   // 超出上限删除时间最远的
+  persistHistory(arr);
+  histConfirmId = null;
+  renderHistory();
+}
+
+function fmtTime(ts) {
+  const d = new Date(ts);
+  const p = n => (n < 10 ? '0' + n : '' + n);
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+function sortedHistory(arr) {
+  const a = arr.slice();
+  if (histSortMode === 'ratio') {
+    a.sort((x, y) => {
+      const rx = (x.ratio === null || x.ratio === undefined) ? -Infinity : x.ratio;
+      const ry = (y.ratio === null || y.ratio === undefined) ? -Infinity : y.ratio;
+      return ry - rx;
+    });
+  } else {
+    a.sort((x, y) => y.ts - x.ts);
+  }
+  return a;
+}
+
+function renderHistory() {
+  const wrap = document.getElementById('histWrap');
+  const list = document.getElementById('histList');
+  const arr = loadHistory();
+  document.getElementById('histCount').textContent = arr.length ? '（' + arr.length + '/' + HISTORY_MAX + '）' : '';
+  // 平均性价比：仅统计有性价比的记录；每次新增/删除都会重新渲染并即时更新
+  const validRatios = arr.map(r => r.ratio).filter(v => v !== null && v !== undefined);
+  const rawAvg = validRatios.length ? validRatios.reduce((a, b) => a + b, 0) / validRatios.length : null;
+  // 用 Math.round 四舍五入到 1 位（加极小 epsilon 规避 .x5 浮点边界误判）
+  const avg = rawAvg === null ? null : Math.round((rawAvg + 1e-9) * 10) / 10;
+  document.getElementById('histAvg').textContent = avg === null ? '平均性价比 —' : '平均性价比 ' + avg + '%';
+  if (!arr.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
+  wrap.style.display = 'block';
+  list.innerHTML = '';
+  sortedHistory(arr).forEach(rec => {
+    const item = document.createElement('div');
+    item.className = 'hist-item';
+    item.dataset.id = rec.id;
+    if (rec.id === histConfirmId) {
+      item.classList.add('confirm');
+      item.innerHTML = '<div class="confirm-row"><span class="confirm-text">删除这条记录？</span>'
+        + '<button type="button" class="confirm-yes">确认删除</button>'
+        + '<button type="button" class="confirm-no">取消</button></div>';
+      item.querySelector('.confirm-yes').onclick = e => { e.stopPropagation(); deleteHistory(rec.id); };
+      item.querySelector('.confirm-no').onclick = e => { e.stopPropagation(); histConfirmId = null; renderHistory(); };
+    } else {
+      item.innerHTML =
+        '<div class="hist-top"><span class="hist-name">' + escapeHtml(rec.role) + '</span>'
+        + '<span class="hist-ratio">' + ((rec.ratio === null || rec.ratio === undefined) ? '—' : rec.ratio + '%') + '</span></div>'
+        + '<div class="hist-meta"><span>等级 <b>' + rec.level + '</b></span><span>门派 <b>' + escapeHtml(rec.menpai) + '</span>'
+        + '<span>价格 <b>¥' + fmt(rec.price) + '</b></span></div>'
+        + '<div class="hist-time">' + fmtTime(rec.ts) + '</div>';
+      attachLongPress(item, rec.id, () => openDetail(rec.id));
+    }
+    list.appendChild(item);
+  });
+}
+
+function deleteHistory(id) {
+  persistHistory(loadHistory().filter(r => r.id !== id));
+  histConfirmId = null;
+  renderHistory();
+  showToast('已删除该记录');
+}
+function openDetail(id) {
+  const rec = loadHistory().find(r => r.id === id);
+  if (!rec || !rec.S) { showToast('记录详情缺失'); return; }
+  renderResult(rec.S);
+  show('Result');
+}
+
+// 长按（移动端 touch + 桌面鼠标，600ms 进入删除确认）；正常点击查看详情；右键也可删除
+function attachLongPress(el, id, onClick) {
+  let timer = null;
+  let longFired = false;
+  const start = () => {
+    longFired = false;
+    timer = setTimeout(() => {
+      longFired = true;
+      histConfirmId = id;
+      renderHistory();
+      if (navigator.vibrate) { try { navigator.vibrate(30); } catch (e) {} }
+    }, 600);
+  };
+  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  el.addEventListener('touchstart', start, { passive: true });
+  el.addEventListener('touchmove', cancel, { passive: true });
+  el.addEventListener('touchend', cancel);
+  el.addEventListener('touchcancel', cancel);
+  el.addEventListener('mousedown', start);
+  el.addEventListener('mousemove', cancel);
+  el.addEventListener('mouseup', cancel);
+  el.addEventListener('mouseleave', cancel);
+  el.addEventListener('contextmenu', e => { e.preventDefault(); cancel(); histConfirmId = id; renderHistory(); });
+  el.addEventListener('click', e => {
+    if (longFired) { e.preventDefault(); longFired = false; return; }
+    onClick();
+  });
+}
+
+function setSort(mode) {
+  histSortMode = mode;
+  document.getElementById('sortTime').classList.toggle('on', mode === 'time');
+  document.getElementById('sortRatio').classList.toggle('on', mode === 'ratio');
+  renderHistory();
+}
+document.getElementById('sortTime').onclick = () => setSort('time');
+document.getElementById('sortRatio').onclick = () => setSort('ratio');
+renderHistory();
 
 // ===== 结果态渲染 =====
 const xlLabel = { "1": "攻击修炼", "2": "防御修炼", "3": "法术修炼", "4": "抗法修炼", "5": "猎术修炼" };
@@ -33229,6 +33487,7 @@ function resetAll() {
   document.getElementById('barFill').style.width = 0;
   document.getElementById('retryBox').style.display = 'none';
   show('Pick');
+  renderHistory();
 }
 </script>
 </body>
