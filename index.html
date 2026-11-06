@@ -175,16 +175,26 @@
       // 区域标记
       if (c.includes('师门技能') || c.includes('生活技能')) { inSkillArea = true; return; }
 
-      // 1. 角色｜门派｜等级（全角｜或半角|）；OCR 可能把等级拆到下一行，故两段也先取角色/门派
+      // 1. 角色｜门派｜等级（全角｜或半角|）。兼容三种 OCR 拆行：
+      //   a) 一行三段“角色｜门派｜69级”
+      //   b) “角色｜门派” + 独立“140级”（下行走 lvOnly 规则）
+      //   c) “角色｜门派” + 续行“｜144级”（首段为空，只取等级、不覆盖角色/门派）
       if (line.includes('｜') || line.includes('|')) {
         const parts = line.split(/[｜|]/).map(s => s.trim());
-        if (parts.length >= 2) {
+        if (parts[0]) {
+          // 真正的角色起始行：首段为角色，第二段（不含“级”）为门派
           out.info.role = compact(parts[0]);
           out.info.name = out.info.role;
-          out.info.menpai = compact(parts[1]);
+          if (parts[1] && !/级/.test(parts[1])) out.info.menpai = compact(parts[1]);
         }
-        if (parts.length >= 3) {
-          const lv = parts[2].match(/(\d+)/);
+        // 任意段中的“数字级”作为等级
+        parts.forEach(p => {
+          const lm = p.match(/(\d+)\s*级/);
+          if (lm) out.info.level = +lm[1];
+        });
+        // 三段式第三段可能是纯数字（无“级”字）
+        if (parts.length >= 3 && out.info.level === 0) {
+          const lv = parts[2].match(/^(\d+)$/);
           if (lv) out.info.level = +lv[1];
         }
         return;
@@ -32876,8 +32886,10 @@ window.MH_DATA = {
   .hist-top { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; }
   .hist-name { font-size:16px; font-weight:bold; color:#1f4e79; }
   .hist-ratio { font-size:15px; font-weight:bold; color:#b9770e; background:#fdf3e3; border:1px solid #f3e0bd; padding:4px 12px; border-radius:16px; white-space:nowrap; }
-  .hist-meta { display:flex; flex-wrap:wrap; gap:8px 18px; font-size:13px; color:#556070; }
-  .hist-meta b { color:#23303f; }
+  .hist-meta { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .meta-cell { display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .meta-label { font-size:11px; color:#98a2b0; line-height:1; }
+  .meta-cell b { font-size:14px; color:#23303f; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .hist-time { font-size:12px; color:#98a2b0; margin-top:9px; }
   .hist-empty { font-size:13px; color:#98a2b0; text-align:center; padding:22px; background:#fcfdfe; border:1px dashed #d4dce8; border-radius:12px; }
   .hist-item.confirm { border-color:#e74c3c; background:#fef6f5; }
@@ -32920,7 +32932,8 @@ window.MH_DATA = {
     input[type=text], input[type=number] { max-width:100%; }
     .sec { padding:16px 14px; }
     .hist-item { padding:13px 14px; }
-    .hist-meta { gap:7px 14px; }
+    .hist-meta { gap:8px; }
+    .meta-cell b { font-size:13px; }
     .confirm-text { flex:1 1 100%; }
   }
 </style>
@@ -32948,6 +32961,7 @@ window.MH_DATA = {
           <div class="hist-sort">
             <button type="button" class="sort-btn on" id="sortTime">按时间</button>
             <button type="button" class="sort-btn" id="sortRatio">按性价比</button>
+            <button type="button" class="sort-btn" id="sortPrice">按价格</button>
           </div>
         </div>
       </div>
@@ -33058,7 +33072,7 @@ document.getElementById('retryCancel').onclick = () => {
 // ===== 历史查看记录（localStorage 本地持久化） =====
 const HISTORY_KEY = 'mh_role_history_v1';
 const HISTORY_MAX = 100;
-let histSortMode = 'time';   // 'time' | 'ratio'
+let histSortMode = 'time';   // 'time' | 'ratio' | 'price'
 let histConfirmId = null;    // 当前处于删除确认态的记录 id
 
 function loadHistory() {
@@ -33135,6 +33149,8 @@ function sortedHistory(arr) {
       const ry = (y.ratio === null || y.ratio === undefined) ? -Infinity : y.ratio;
       return ry - rx;
     });
+  } else if (histSortMode === 'price') {
+    a.sort((x, y) => y.price - x.price);
   } else {
     a.sort((x, y) => y.ts - x.ts);
   }
@@ -33170,8 +33186,11 @@ function renderHistory() {
       item.innerHTML =
         '<div class="hist-top"><span class="hist-name">' + escapeHtml(rec.role) + '</span>'
         + '<span class="hist-ratio">' + ((rec.ratio === null || rec.ratio === undefined) ? '—' : rec.ratio + '%') + '</span></div>'
-        + '<div class="hist-meta"><span>等级 <b>' + rec.level + '</b></span><span>门派 <b>' + escapeHtml(rec.menpai) + '</span>'
-        + '<span>价格 <b>¥' + fmt(rec.price) + '</b></span></div>'
+        + '<div class="hist-meta">'
+        + '<span class="meta-cell"><span class="meta-label">等级</span><b>' + rec.level + '</b></span>'
+        + '<span class="meta-cell"><span class="meta-label">门派</span><b>' + escapeHtml(rec.menpai) + '</b></span>'
+        + '<span class="meta-cell"><span class="meta-label">价格</span><b>¥' + fmt(rec.price) + '</b></span>'
+        + '</div>'
         + '<div class="hist-time">' + fmtTime(rec.ts) + '</div>';
       attachLongPress(item, rec.id, () => openDetail(rec.id));
     }
@@ -33225,10 +33244,12 @@ function setSort(mode) {
   histSortMode = mode;
   document.getElementById('sortTime').classList.toggle('on', mode === 'time');
   document.getElementById('sortRatio').classList.toggle('on', mode === 'ratio');
+  document.getElementById('sortPrice').classList.toggle('on', mode === 'price');
   renderHistory();
 }
 document.getElementById('sortTime').onclick = () => setSort('time');
 document.getElementById('sortRatio').onclick = () => setSort('ratio');
+document.getElementById('sortPrice').onclick = () => setSort('price');
 renderHistory();
 
 // ===== 结果态渲染 =====
