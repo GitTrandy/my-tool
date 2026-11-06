@@ -32826,6 +32826,8 @@ window.MH_DATA = {
   .result-head { display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:16px; }
   .reset-btn { background:#fff; border:1px solid #d4dce8; color:#44505f; font-size:14px; font-weight:bold; padding:11px 22px; border-radius:10px; cursor:pointer; box-shadow:0 2px 8px rgba(20,40,70,.08); }
   .reset-btn:hover { border-color:#e74c3c; color:#e74c3c; }
+  .back-btn { background:#2e75b6; border:1px solid #2e75b6; color:#fff; font-size:14px; font-weight:bold; padding:11px 22px; border-radius:10px; cursor:pointer; box-shadow:0 2px 8px rgba(46,117,182,.25); }
+  .back-btn:hover { background:#2563a0; }
   .hero { background:linear-gradient(135deg,#163a5c 0%,#1f4e79 55%,#2e75b6 100%); color:#fff; border-radius:16px; padding:22px; box-shadow:0 10px 28px rgba(22,58,92,.3); margin-bottom:16px; }
   .hero-grid { display:flex; gap:14px; flex-wrap:wrap; }
   .hero-item { flex:1; min-width:150px; }
@@ -32879,10 +32881,21 @@ window.MH_DATA = {
   .hist-avg { font-size:13px; font-weight:bold; color:#1f4e79; background:#eef5fc; border:1px solid #dce8f5; padding:7px 14px; border-radius:20px; white-space:nowrap; }
   .sort-btn { background:#fff; border:1px solid #d4dce8; color:#556070; font-size:13px; font-weight:bold; padding:8px 14px; border-radius:20px; cursor:pointer; }
   .sort-btn.on { background:#2e75b6; border-color:#2e75b6; color:#fff; }
+  .fav-filter-btn { background:#fff; border:1px solid #e8c98a; color:#b9770e; font-size:13px; font-weight:bold; padding:8px 14px; border-radius:20px; cursor:pointer; }
+  .fav-filter-btn:hover { border-color:#e8a33d; }
+  .fav-filter-btn.on { background:#e8a33d; border-color:#e8a33d; color:#fff; }
   .hist-list { display:flex; flex-direction:column; gap:10px; }
-  .hist-item { background:#fff; border:1px solid #e6ebf3; border-radius:12px; padding:14px 16px; cursor:pointer; box-shadow:0 2px 8px rgba(20,40,70,.05); transition:border-color .15s, transform .1s; -webkit-user-select:none; user-select:none; touch-action:manipulation; }
+  .hist-item { position:relative; background:#fff; border:1px solid #e6ebf3; border-radius:12px; overflow:hidden; cursor:pointer; box-shadow:0 2px 8px rgba(20,40,70,.05); transition:border-color .15s; -webkit-user-select:none; user-select:none; touch-action:pan-y; }
   .hist-item:hover { border-color:#2e75b6; }
-  .hist-item:active { transform:scale(.99); }
+  /* 左滑结构：内容层在上、操作按钮固定在右侧底层 */
+  .swipe-wrap { position:relative; }
+  .swipe-content { position:relative; z-index:1; background:#fff; padding:14px 16px; }
+  .swipe-actions { position:absolute; top:0; right:0; width:88px; height:100%; z-index:0; display:flex; }
+  .swipe-fav-btn { width:100%; border:0; background:#e8a33d; color:#fff; font-size:14px; font-weight:bold; cursor:pointer; }
+  .swipe-fav-btn:hover { background:#d18f2c; }
+  .top-right { display:flex; align-items:center; gap:8px; }
+  .fav-star { width:32px; height:32px; border:1px solid #e6ebf3; background:#fff; border-radius:50%; font-size:17px; line-height:1; color:#e8a33d; cursor:pointer; padding:0; display:flex; align-items:center; justify-content:center; }
+  .fav-star:hover { border-color:#e8a33d; }
   .hist-top { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; }
   .hist-name { font-size:16px; font-weight:bold; color:#1f4e79; }
   .hist-ratio { font-size:15px; font-weight:bold; color:#b9770e; background:#fdf3e3; border:1px solid #f3e0bd; padding:4px 12px; border-radius:16px; white-space:nowrap; }
@@ -32931,7 +32944,7 @@ window.MH_DATA = {
     select { min-width:0; }
     input[type=text], input[type=number] { max-width:100%; }
     .sec { padding:16px 14px; }
-    .hist-item { padding:13px 14px; }
+    .swipe-content { padding:13px 14px; }
     .hist-meta { gap:8px; }
     .meta-cell b { font-size:13px; }
     .confirm-text { flex:1 1 100%; }
@@ -32963,6 +32976,7 @@ window.MH_DATA = {
             <button type="button" class="sort-btn" id="sortRatio">按性价比</button>
             <button type="button" class="sort-btn" id="sortPrice">按价格</button>
           </div>
+          <button type="button" class="fav-filter-btn" id="favFilterBtn" aria-pressed="false">★ 只看收藏</button>
         </div>
       </div>
       <div class="hist-list" id="histList"></div>
@@ -33019,6 +33033,19 @@ function show(name) {
   document.getElementById('view' + name).classList.add('on');
 }
 
+// ===== 主页（选图+历史）/ 详情页导航 =====
+// 用 History API 压栈，使 iPhone 边缘滑动、浏览器/微信返回键都能回到主页
+let detailMode = 'new';   // 'new' 新识别 | 'history' 从历史进入
+function enterDetail(mode) {
+  detailMode = mode;
+  show('Result');
+  try { history.pushState({ view: 'result' }, ''); } catch (e) {}
+}
+window.addEventListener('popstate', () => {
+  // 系统手势/返回键：当前在详情页则回主页
+  if (viewResult.classList.contains('on')) resetAll();
+});
+
 // 文件选择 / 拖拽
 const fileInput = document.getElementById('fileInput');
 document.getElementById('drop').onclick = () => fileInput.click();
@@ -33045,10 +33072,10 @@ async function runRecognize(file) {
     const lines = await recognizeOnline(file, setProg);
     setProg(98, '正在解析并计算…');
     const S = parseOcr(D, lines);
-    renderResult(S);
     saveHistory(S);
+    enterDetail('new');
+    renderResult(S);
     setProg(100, '完成');
-    show('Result');
   } catch (err) {
     document.getElementById('retryMsg').textContent = '识别失败：' + (err.message || err) + '（已自动重试 3 次）';
     document.getElementById('retryBox').style.display = 'block';
@@ -33074,6 +33101,9 @@ const HISTORY_KEY = 'mh_role_history_v1';
 const HISTORY_MAX = 100;
 let histSortMode = 'time';   // 'time' | 'ratio' | 'price'
 let histConfirmId = null;    // 当前处于删除确认态的记录 id
+let openSwipeId = null;      // 当前左滑展开操作按钮的记录 id
+let favFilter = false;       // 只看收藏开关
+const SWIPE_W = 88;          // 左滑露出的操作区宽度（px）
 
 function loadHistory() {
   try {
@@ -33123,6 +33153,7 @@ function saveHistory(S) {
     menpai: S.info.menpai || '—',
     price: S.info.origPrice || 0,
     ratio: sum.ratio,
+    fav: false,
     S: S
   };
   const arr = loadHistory();
@@ -33171,7 +33202,12 @@ function renderHistory() {
   if (!arr.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
   wrap.style.display = 'block';
   list.innerHTML = '';
-  sortedHistory(arr).forEach(rec => {
+  const showArr = favFilter ? arr.filter(r => r.fav) : arr;
+  if (!showArr.length) {
+    list.innerHTML = '<div class="hist-empty">还没有收藏的记录，点击卡片右上角星标或左滑即可收藏</div>';
+    return;
+  }
+  sortedHistory(showArr).forEach(rec => {
     const item = document.createElement('div');
     item.className = 'hist-item';
     item.dataset.id = rec.id;
@@ -33183,16 +33219,26 @@ function renderHistory() {
       item.querySelector('.confirm-yes').onclick = e => { e.stopPropagation(); deleteHistory(rec.id); };
       item.querySelector('.confirm-no').onclick = e => { e.stopPropagation(); histConfirmId = null; renderHistory(); };
     } else {
+      const isFav = !!rec.fav;
+      const startTx = (rec.id === openSwipeId) ? -SWIPE_W : 0;
       item.innerHTML =
-        '<div class="hist-top"><span class="hist-name">' + escapeHtml(rec.role) + '</span>'
-        + '<span class="hist-ratio">' + ((rec.ratio === null || rec.ratio === undefined) ? '—' : rec.ratio + '%') + '</span></div>'
+        '<div class="swipe-wrap">'
+        + '<div class="swipe-content" style="transform:translateX(' + startTx + 'px)">'
+        + '<div class="hist-top"><span class="hist-name">' + escapeHtml(rec.role) + '</span>'
+        + '<span class="top-right">'
+        + '<button type="button" class="fav-star" title="' + (isFav ? '取消收藏' : '收藏') + '">' + (isFav ? '★' : '☆') + '</button>'
+        + '<span class="hist-ratio">' + ((rec.ratio === null || rec.ratio === undefined) ? '—' : rec.ratio + '%') + '</span>'
+        + '</span></div>'
         + '<div class="hist-meta">'
         + '<span class="meta-cell"><span class="meta-label">等级</span><b>' + rec.level + '</b></span>'
         + '<span class="meta-cell"><span class="meta-label">门派</span><b>' + escapeHtml(rec.menpai) + '</b></span>'
         + '<span class="meta-cell"><span class="meta-label">价格</span><b>¥' + fmt(rec.price) + '</b></span>'
         + '</div>'
-        + '<div class="hist-time">' + fmtTime(rec.ts) + '</div>';
-      attachLongPress(item, rec.id, () => openDetail(rec.id));
+        + '<div class="hist-time">' + fmtTime(rec.ts) + '</div>'
+        + '</div>'
+        + '<div class="swipe-actions"><button type="button" class="swipe-fav-btn">' + (isFav ? '取消收藏' : '收藏') + '</button></div>'
+        + '</div>';
+      attachCardEvents(item, rec.id, () => openDetail(rec.id));
     }
     list.appendChild(item);
   });
@@ -33204,38 +33250,110 @@ function deleteHistory(id) {
   renderHistory();
   showToast('已删除该记录');
 }
+function toggleFav(id) {
+  const arr = loadHistory();
+  const rec = arr.find(r => r.id === id);
+  if (!rec) return;
+  rec.fav = !rec.fav;
+  persistHistory(arr);
+  showToast(rec.fav ? '已收藏' : '已取消收藏');
+  openSwipeId = null;
+  renderHistory();
+}
 function openDetail(id) {
   const rec = loadHistory().find(r => r.id === id);
   if (!rec || !rec.S) { showToast('记录详情缺失'); return; }
-  renderResult(rec.S);
-  show('Result');
+  enterDetail('history');   // 先设模式、切视图、压栈
+  renderResult(rec.S);      // 再渲染（此时 detailMode 已正确）
 }
 
-// 长按（移动端 touch + 桌面鼠标，600ms 进入删除确认）；正常点击查看详情；右键也可删除
-function attachLongPress(el, id, onClick) {
+// 卡片统一事件：长按/右键删除、左滑收藏、轻点查看详情；星标与收藏按钮直接收藏
+function attachCardEvents(el, id, onClick) {
+  const content = el.querySelector('.swipe-content');
   let timer = null;
   let longFired = false;
-  const start = () => {
+  let startX = 0, startY = 0, baseTx = 0, curTx = 0;
+  let axis = null;    // 'h' 水平滑动 | 'v' 垂直滚动
+  let swiped = false;
+  const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  const setTx = (x, animate) => {
+    content.style.transition = animate ? 'transform .22s ease' : 'none';
+    content.style.transform = 'translateX(' + x + 'px)';
+  };
+
+  // ---- 触摸 ----
+  el.addEventListener('touchstart', e => {
+    longFired = false; swiped = false; axis = null;
+    const t = e.touches[0];
+    startX = t.clientX; startY = t.clientY;
+    baseTx = (id === openSwipeId) ? -SWIPE_W : 0;
+    curTx = baseTx;
+    timer = setTimeout(() => {
+      longFired = true;
+      histConfirmId = id;
+      renderHistory();
+      if (navigator.vibrate) { try { navigator.vibrate(30); } catch (err) {} }
+    }, 600);
+  }, { passive: true });
+
+  el.addEventListener('touchmove', e => {
+    const t = e.touches[0];
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    if (!axis && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+      axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+      if (axis === 'h') clearTimer();
+    }
+    if (axis === 'h') {
+      clearTimer();
+      e.preventDefault();
+      let nx = baseTx + dx;
+      if (nx > 0) nx = 0;
+      if (nx < -SWIPE_W) nx = -SWIPE_W;
+      curTx = nx;
+      setTx(nx, false);
+      swiped = true;
+    }
+  }, { passive: false });
+
+  const finishTouch = () => {
+    clearTimer();
+    if (axis === 'h') {
+      if (curTx < -SWIPE_W / 2) { setTx(-SWIPE_W, true); openSwipeId = id; }
+      else { setTx(0, true); openSwipeId = null; }
+    }
+  };
+  el.addEventListener('touchend', finishTouch);
+  el.addEventListener('touchcancel', () => { clearTimer(); setTx(baseTx, true); });
+
+  // ---- 鼠标（桌面：长按/右键删除，滑动交给星标按钮）----
+  const mStart = () => {
     longFired = false;
     timer = setTimeout(() => {
       longFired = true;
       histConfirmId = id;
       renderHistory();
-      if (navigator.vibrate) { try { navigator.vibrate(30); } catch (e) {} }
     }, 600);
   };
-  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
-  el.addEventListener('touchstart', start, { passive: true });
-  el.addEventListener('touchmove', cancel, { passive: true });
-  el.addEventListener('touchend', cancel);
-  el.addEventListener('touchcancel', cancel);
-  el.addEventListener('mousedown', start);
-  el.addEventListener('mousemove', cancel);
-  el.addEventListener('mouseup', cancel);
-  el.addEventListener('mouseleave', cancel);
-  el.addEventListener('contextmenu', e => { e.preventDefault(); cancel(); histConfirmId = id; renderHistory(); });
+  el.addEventListener('mousedown', mStart);
+  el.addEventListener('mousemove', clearTimer);
+  el.addEventListener('mouseup', clearTimer);
+  el.addEventListener('mouseleave', clearTimer);
+  el.addEventListener('contextmenu', e => { e.preventDefault(); clearTimer(); histConfirmId = id; renderHistory(); });
+
+  // ---- 点击 ----
   el.addEventListener('click', e => {
     if (longFired) { e.preventDefault(); longFired = false; return; }
+    if (e.target.closest('.fav-star') || e.target.closest('.swipe-fav-btn')) {
+      e.stopPropagation();
+      toggleFav(id);
+      return;
+    }
+    if (swiped) { swiped = false; return; }
+    // 有其它卡片展开时，先收起
+    if (openSwipeId && openSwipeId !== id) { openSwipeId = null; renderHistory(); return; }
+    // 点已展开的卡片：收起而非进详情
+    if (openSwipeId === id) { openSwipeId = null; renderHistory(); return; }
     onClick();
   });
 }
@@ -33250,6 +33368,14 @@ function setSort(mode) {
 document.getElementById('sortTime').onclick = () => setSort('time');
 document.getElementById('sortRatio').onclick = () => setSort('ratio');
 document.getElementById('sortPrice').onclick = () => setSort('price');
+const favFilterBtn = document.getElementById('favFilterBtn');
+favFilterBtn.onclick = () => {
+  favFilter = !favFilter;
+  favFilterBtn.classList.toggle('on', favFilter);
+  favFilterBtn.setAttribute('aria-pressed', favFilter ? 'true' : 'false');
+  openSwipeId = null;
+  renderHistory();
+};
 renderHistory();
 
 // ===== 结果态渲染 =====
@@ -33276,7 +33402,9 @@ function renderResult(S) {
   viewResult.innerHTML = `
     <div class="result-head">
       <h1 style="margin:0">角色估价结果</h1>
-      <button class="reset-btn" id="resetBtn">↺ 重置 / 重新选图</button>
+      ${detailMode === 'history'
+        ? '<button class="back-btn" id="backBtn">← 返回</button>'
+        : '<button class="reset-btn" id="resetBtn">↺ 重置 / 重新选图</button>'}
     </div>
 
     <div class="hero">
@@ -33441,8 +33569,11 @@ function renderResult(S) {
   viewResult.querySelector("#mountBase").oninput = recalc;
   viewResult.querySelector("#mountCur").oninput = recalc;
 
-  // 重置
-  viewResult.querySelector("#resetBtn").onclick = resetAll;
+  // 重置 / 返回：统一走 history.back()，触发 popstate 后由 resetAll 回主页，保证历史栈平衡
+  const backBtn = viewResult.querySelector("#backBtn");
+  if (backBtn) backBtn.onclick = () => history.back();
+  const resetBtn = viewResult.querySelector("#resetBtn");
+  if (resetBtn) resetBtn.onclick = () => history.back();
   // 汇率区默认折叠，避免喧宾夺主
   viewResult.querySelector("details.rates").open = false;
 
